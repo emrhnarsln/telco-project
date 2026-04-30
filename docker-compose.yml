@@ -1,0 +1,77 @@
+# =============================================================
+# Telco Project - Docker Compose
+# =============================================================
+# Spins up an Oracle XE 21c instance with:
+#   - Automatic schema user creation  (APP_USER / APP_USER_PASSWORD)
+#   - Auto-execution of every *.sql file placed under docker/init/
+#   - A named volume so data survives container restarts
+#
+# Quick start:
+#   1. cp .env.example .env        # create your local secrets file
+#   2. docker compose up -d        # start the database in the background
+#   3. docker compose logs -f      # tail logs until you see "DATABASE IS READY"
+# =============================================================
+
+services:
+  # -----------------------------------------------------------
+  # Oracle XE 21c
+  # Image: gvenzl/oracle-xe (community-maintained, production-
+  # grade wrapper around Oracle XE – no login required)
+  # Docs: https://github.com/gvenzl/oci-oracle-xe
+  # -----------------------------------------------------------
+  oracle-xe:
+    image: gvenzl/oracle-xe:21-slim-faststart
+    container_name: telco-oracle-xe
+
+    # ── Port mappings ──────────────────────────────────────────
+    ports:
+      - "${ORACLE_PORT:-1521}:1521" # SQL*Net / JDBC
+      - "${ORACLE_EM_PORT:-5500}:5500" # Oracle Enterprise Manager Express (optional)
+
+    # ── Environment variables ──────────────────────────────────
+    # All three variables below are read from your .env file.
+    # The container automatically creates the APP_USER schema
+    # and grants it the necessary privileges on first boot.
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD} # SYS / SYSTEM password
+      APP_USER: ${ORACLE_APP_USER} # application schema user
+      APP_USER_PASSWORD: ${ORACLE_APP_PASSWORD} # application schema password
+
+    # ── Volumes ────────────────────────────────────────────────
+    volumes:
+      # Persist database files across container restarts
+      - oracle-data:/opt/oracle/oradata
+
+      # Auto-seeding: every *.sql / *.sh file in this directory
+      # is executed (in alphabetical order) after the database
+      # is fully initialized on the very first startup.
+      # Files run as APP_USER when APP_USER is set.
+      - ./docker/init:/container-entrypoint-initdb.d
+
+    # ── Health check ───────────────────────────────────────────
+    # The bundled healthcheck.sh script exits 0 only when Oracle
+    # is fully open and accepting connections.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 15s
+      retries: 25
+      start_period: 120s # XE needs ~60-90 s to initialise on first run
+
+    # ── Restart policy ─────────────────────────────────────────
+    restart: unless-stopped
+
+    # ── Resource limits (optional, tune to your machine) ───────
+    # Uncomment the block below if you need to cap resource usage.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2"
+    #       memory: 2G
+    #     reservations:
+    #       memory: 1G
+
+# ── Named volume ─────────────────────────────────────────────────────────────
+volumes:
+  oracle-data:
+    name: telco-oracle-data # explicit name makes it easy to find with `docker volume ls`
